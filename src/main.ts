@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
 import {
     FastifyAdapter,
     NestFastifyApplication,
@@ -12,6 +13,15 @@ async function bootstrap() {
             trustProxy: true,
         }),
     );
+
+    app.useGlobalPipes(
+        new ValidationPipe({
+            whitelist: true,
+            forbidNonWhitelisted: true,
+            transform: true,
+        }),
+    );
+
     await app.listen(process.env.PORT ?? 3000);
 }
 bootstrap();

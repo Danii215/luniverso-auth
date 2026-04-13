@@ -5,9 +5,9 @@ import {
     UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GqlExecutionContext } from '@nestjs/graphql';
 import { PrismaService } from '../../prisma/prisma.service';
 import * as jwt from 'jsonwebtoken';
+import type { FastifyRequest } from 'fastify';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -17,8 +17,8 @@ export class AuthGuard implements CanActivate {
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
-        const ctx = context.getArgByIndex(2);
-        const authHeader = ctx?.req?.headers?.authorization;
+        const req = context.switchToHttp().getRequest<FastifyRequest>();
+        const authHeader = req.headers.authorization;
 
         if (!authHeader) throw new UnauthorizedException('Missing token');
 
@@ -31,7 +31,7 @@ export class AuthGuard implements CanActivate {
         let payload: jwt.JwtPayload;
         try {
             payload = jwt.verify(token, secret) as jwt.JwtPayload;
-        } catch (err) {
+        } catch {
             throw new UnauthorizedException('Invalid token');
         }
 
@@ -43,8 +43,8 @@ export class AuthGuard implements CanActivate {
         if (session.expiresAt < new Date())
             throw new UnauthorizedException('Session expired');
 
-        const currentIp = ctx.req.ip;
-        const currentUA = ctx.req.headers['user-agent'];
+        const currentIp = req.ip;
+        const currentUA = req.headers['user-agent'];
 
         if (
             (session.ip && session.ip !== currentIp) ||
@@ -55,7 +55,7 @@ export class AuthGuard implements CanActivate {
             );
         }
 
-        ctx.req.user = { id: payload.sub, sessionId: session.id };
+        (req as any).user = { id: payload.sub, sessionId: session.id };
 
         const user = await this.prisma.user.findFirst({
             where: { id: payload.sub },
@@ -65,16 +65,14 @@ export class AuthGuard implements CanActivate {
         if (!user) throw new UnauthorizedException('User not found');
 
         if (!user.emailVerified) {
-            const gql = GqlExecutionContext.create(context);
-            const fieldName = gql.getInfo?.()?.fieldName;
+            const url = req.url;
+            const allowlist = [
+                '/auth/email/send-verification',
+                '/auth/email/verify',
+                '/auth/logout',
+            ];
 
-            const allowlist = new Set([
-                'sendEmailVerification',
-                'verifyEmail',
-                'logout',
-            ]);
-
-            if (!fieldName || !allowlist.has(fieldName)) {
+            if (!allowlist.some((path) => url.startsWith(path))) {
                 throw new UnauthorizedException('Email not verified');
             }
         }

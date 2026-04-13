@@ -1,13 +1,12 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { AuthService } from './auth.service';
-import { AuthResolver } from './auth.resolver';
+import { AuthController } from './auth.controller';
+import { AuthGuard } from './guard';
 
 import { PrismaModule } from '..';
-
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { AuthGuard } from './guard';
 import { EmailModule } from '../email/email.module';
 
 @Module({
@@ -25,7 +24,9 @@ import { EmailModule } from '../email/email.module';
         }),
     ],
 
-    providers: [AuthService, AuthResolver, AuthGuard],
+    controllers: [AuthController],
+
+    providers: [AuthService, AuthGuard],
 
     exports: [JwtModule],
 })
