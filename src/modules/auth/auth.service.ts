@@ -39,7 +39,7 @@ export class AuthService {
             },
         });
 
-        await this.sendEmailVerification(user.id);
+        // await this.sendEmailVerification(user.id);
 
         return this.createSession(user.id, ip, userAgent);
     }

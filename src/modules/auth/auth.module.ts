@@ -10,6 +10,8 @@ import { PrismaModule } from '..';
 import { EmailModule } from '../email/email.module';
 
 @Module({
+    providers: [AuthService, AuthGuard],
+    controllers: [AuthController],
     imports: [
         PrismaModule,
         ConfigModule,
@@ -23,11 +25,6 @@ import { EmailModule } from '../email/email.module';
             }),
         }),
     ],
-
-    controllers: [AuthController],
-
-    providers: [AuthService, AuthGuard],
-
     exports: [JwtModule],
 })
 export class AuthModule {}

@@ -20,10 +20,10 @@ export class AuthGuard implements CanActivate {
         const req = context.switchToHttp().getRequest<FastifyRequest>();
         const authHeader = req.headers.authorization;
 
-        if (!authHeader) throw new UnauthorizedException('Missing token');
+        if (!authHeader) throw new UnauthorizedException('Operation requires to be logged in.');
 
         const token = authHeader.split(' ')[1];
-        if (!token) throw new UnauthorizedException('Missing token');
+        if (!token) throw new UnauthorizedException('Operation requires to be logged in.');
 
         const secret = this.config.get<string>('JWT_SECRET');
         if (!secret) throw new Error('JWT_SECRET not defined');
@@ -32,7 +32,7 @@ export class AuthGuard implements CanActivate {
         try {
             payload = jwt.verify(token, secret) as jwt.JwtPayload;
         } catch {
-            throw new UnauthorizedException('Invalid token');
+            throw new UnauthorizedException('Invalid');
         }
 
         const session = await this.prisma.session.findUnique({

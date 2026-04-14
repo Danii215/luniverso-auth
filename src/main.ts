@@ -23,7 +23,9 @@ async function bootstrap() {
     );
 
     app.enableCors({
-        origin: process.env.CORS_ORIGIN?.split(',').map((o) => o.trim()) ?? true,
+        origin: process.env.CORS_ORIGIN
+            ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+            : false, // bloqueia tudo se não definido
         credentials: true,
     });
 

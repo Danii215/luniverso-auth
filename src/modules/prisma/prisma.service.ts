@@ -1,10 +1,9 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { INestApplication, Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
-
-import { normalizePostgresDatabaseUrl } from './database-url';
+import { normalizePostgresDatabaseUrl } from './prisma.utils';
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit {
@@ -15,14 +14,19 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
 
         const pool = new Pool({
             connectionString,
+            max: 10,
         });
 
-        const adapter = new PrismaPg(pool);
-
-        super({ adapter });
+        super({ adapter: new PrismaPg(pool) });
     }
 
     async onModuleInit() {
         await this.$connect();
+    }
+
+    async enableShutdownHooks(app: INestApplication) {
+        this.$on('beforeExit', async () => {
+            await app.close();
+        });
     }
 }
