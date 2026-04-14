@@ -1,134 +1,326 @@
-## `core/` — Backend (NestJS + GraphQL)
+# luniverso-auth
 
-Esta pasta contém o **backend** do projeto: uma API **GraphQL** em **NestJS**, rodando em **Fastify**, com:
+API REST de autenticação em **NestJS** + **Fastify**, com **JWT** (access token), **refresh token** rotativo, **sessões** no PostgreSQL (**Prisma**), rate limit (**Redis** opcional) e envio de e-mail (**Resend**) para verificação de conta.
 
-- **Auth**: login/registro com **JWT (access token)** + **sessões** persistidas no banco, e **refresh token** rotativo.
-- **Persistência**: **Prisma** usando **PostgreSQL** (via `@prisma/adapter-pg`).
-- **Rate limit**: `@nestjs/throttler` com storage em **Redis** (para funcionar em ambiente distribuído).
-- **E-mail**: envio via **Resend** (usado para verificação de e-mail).
+**Base URL:** `http://localhost:{PORT}` (por padrão `PORT=3000`, ajuste conforme o `.env`).
 
-### Estrutura da pasta
+**Formato:** JSON (`Content-Type: application/json`). Respostas de sucesso são JSON; erros seguem o padrão do NestJS (corpo com `message`, `statusCode`, etc.).
 
-- **`src/main.ts`**: bootstrap do Nest com `@nestjs/platform-fastify` e `trustProxy`.
-- **`src/app.module.ts`**: módulo raiz; registra GraphQL, config, throttling, prisma e módulos de domínio.
-- **`src/modules/`**: módulos de domínio/infra:
-    - **`graphql/`**: configuração do GraphQL (Apollo). Gera schema automaticamente.
-    - **`auth/`**: resolver + service + guard. Gerencia credenciais, tokens e sessões.
-    - **`user/`**: resolver/service para perfil do usuário (ex.: `me`).
-    - **`prisma/`**: `PrismaService` e módulo.
-    - **`throttler/`**: configuração de rate limit com Redis.
-    - **`config/`**: wrapper do `@nestjs/config` (global).
-    - **`email/`**: serviço de envio de e-mail (Resend).
-- **`src/common/GqlThrottlerGuard.ts`**: adaptação do throttler para contexto GraphQL.
-- **`prisma/schema.prisma`**: schema do banco e modelos (`User`, `Session`, `EmailVerification`).
-- **`prisma/migrations/`**: migrations do Prisma.
-- **`dist/`**: build gerado pelo Nest (não edite manualmente).
-- **`redis.sh`**: atalho simples para subir um Redis via Docker.
+---
 
-### GraphQL (schema e contexto)
+## Autenticação nas rotas protegidas
 
-- **Schema**: é gerado automaticamente em `src/schema.gql` (arquivo marcado como **auto-gerado**).
-- **Contexto**: o GraphQL injeta `req`/`res` do Fastify (ver `src/modules/graphql/graphql.module.ts`).
+Envie o access token JWT no header:
 
-### Autenticação e sessões (visão geral)
-
-- **Access token (JWT)**: emitido com `sub` (userId) e `sessionId`. Validade configurada para **15 minutos**.
-- **Refresh token**: formato `tokenId.secret`.
-    - No banco, o `secret` é armazenado **hasheado**.
-    - No refresh, o `tokenId` é **rotacionado** e o `secret` também.
-- **Sessão vinculada ao dispositivo**: o guard compara `ip` e `user-agent` atuais com o que foi salvo na sessão (se existirem), para mitigar roubo de token.
-
-### Operações GraphQL disponíveis
-
-Com base em `src/schema.gql`, as principais operações são:
-
-- **Queries**
-    - **`me`**: retorna o usuário autenticado.
-    - **`activeSessions`**: lista sessões ativas (marcando a sessão atual).
-- **Mutations**
-    - **`register`**: cria usuário, envia verificação de e-mail e cria sessão.
-    - **`login`**: autentica e cria sessão.
-    - **`logout`**: encerra a sessão atual.
-    - **`refreshToken`**: renova access/refresh token (rotacionando o refresh).
-    - **`disconnectSession`** / **`disconnectAllSessions`**: encerra sessões.
-    - **`sendEmailVerification`** / **`verifyEmail`**: fluxo de verificação por e-mail.
-
-- **TODO**
-    - **Senha**
-        - [ ] Solicitar redefinição de senha (Esqueci a senha)
-        - [ ] Redefinir senha (Redefinir senha)
-        - [ ] Alterar senha (Alterar senha)
-
-    - **Sessões**
-        - [ ] Ao invés de deletar do banco, marcar como invalidada (expiresAt < now())
-
-    - **E-mail**
-        - [ ] Invalidar tokens antigos ao reenviar (manter só o último válido)
-        - [ ] Verificar se o e-mail é válido (usar regex e endereços confiáveis)
-
-    - **Usuário**
-        - [ ] Adicionar mutations para atualizar perfil (username, displayName, avatarUrl, dentre outros no futuro)
-        - [ ] Adicionar verificação de telefone
-
-    - **API**
-        - [ ] Desabilitar graphql playground em produção
-        - [ ] Adicionar headers de segurança (CORS, X-Frame-Options, X-Content-Type-Options, X-XSS-Protection, etc.)
-        - [ ] Adicionar logging
-        - [ ] Adicionar health check
-        - [ ] Adicionar metrics
-        - [ ] Adicionar tracing
-        - [ ] Adicionar seed
-        - [ ] Centralizar variáveis de ambiente e validar na inicialização
-        - [ ] Fallback se o Redis cair
-        - [ ] Testes
-
-### Variáveis de ambiente (necessárias)
-
-Este serviço depende de variáveis em runtime (ex.: `.env`). Principais:
-
-- **`PORT`**: porta do servidor (default `3000`).
-- **`DATABASE_URL`**: conexão do Postgres (usada pelo `pg`/Prisma).
-- **`JWT_SECRET`**: segredo para assinar/verificar JWT.
-- **`FRONTEND_URL`**: base URL do frontend (usado no link de verificação de e-mail).
-- **`REDIS_URL`**: host do Redis (ex.: `localhost`).
-- **`REDIS_PORT`**: porta do Redis (default `6379`).
-- **`EMAIL_HOST`**: remetente usado pelo Resend (campo `from`).
-- **`EMAIL_KEY`**: API key do Resend.
-
-### Como rodar localmente
-
-Instalar dependências:
-
-```bash
-pnpm install
+```http
+Authorization: Bearer <accessToken>
 ```
 
-Subir Redis (opcional, mas recomendado por causa do throttling):
+O access token expira em **15 minutos** (configurado no `JwtModule`). Use `POST /auth/refresh` com o refresh token para obter novos tokens.
 
-```bash
-./redis.sh
+**E-mail não verificado:** com token válido, só é possível chamar `POST /auth/logout`, `POST /auth/email/send-verification` e `POST /auth/email/verify` até verificar o e-mail. Demais rotas autenticadas retornam **401** com mensagem `Email not verified`.
+
+**Sessão e dispositivo:** o servidor grava `ip` e `user-agent` na sessão. Se estiverem salvos, o request atual deve coincidir; caso contrário, **401** (`Session does not match the current device`).
+
+---
+
+## Rotas
+
+Todas as URLs abaixo são relativas à base (ex.: `POST /auth/register` → `http://localhost:3000/auth/register`).
+
+### `POST /auth/register`
+
+Cria usuário, dispara fluxo de verificação de e-mail e abre uma sessão (tokens).
+
+|                |                               |
+| -------------- | ----------------------------- |
+| **Rate limit** | 5 requisições / 60 s (por IP) |
+| **Auth**       | Não                           |
+
+**Body (JSON)**
+
+| Campo      | Tipo   | Regras              |
+| ---------- | ------ | ------------------- |
+| `email`    | string | E-mail válido       |
+| `password` | string | Mínimo 8 caracteres |
+| `username` | string | Não vazio           |
+
+**Resposta `200` / `201`**
+
+```json
+{
+    "accessToken": "<jwt>",
+    "refreshToken": "<tokenId>.<secret>"
+}
 ```
 
-Rodar em dev (watch):
+**Erros comuns:** `409` — usuário já existe (`User already exists`); `400` — validação (campos inválidos ou propriedades extras no body — o pipe remove/desaprova campos não listados no DTO).
+
+---
+
+### `POST /auth/login`
+
+|                |          |
+| -------------- | -------- |
+| **Rate limit** | 5 / 60 s |
+| **Auth**       | Não      |
+
+**Body**
+
+| Campo      | Tipo   |
+| ---------- | ------ |
+| `email`    | string |
+| `password` | string |
+
+**Resposta**
+
+```json
+{
+    "accessToken": "<jwt>",
+    "refreshToken": "<tokenId>.<secret>"
+}
+```
+
+**Erros:** `401` — credenciais inválidas.
+
+---
+
+### `POST /auth/refresh`
+
+|                |           |
+| -------------- | --------- |
+| **Rate limit** | 10 / 60 s |
+| **Auth**       | Não       |
+
+**Body**
+
+| Campo          | Tipo                                     |
+| -------------- | ---------------------------------------- |
+| `refreshToken` | string — valor completo `tokenId.secret` |
+
+**Resposta**
+
+```json
+{
+    "accessToken": "<jwt>",
+    "refreshToken": "<novo tokenId>.<novo secret>"
+}
+```
+
+(O refresh token é **rotacionado** a cada uso.)
+
+**Erros:** `401` — refresh inválido ou expirado.
+
+---
+
+### `POST /auth/logout`
+
+Encerra a sessão atual (a do JWT).
+
+| **Auth** | Bearer obrigatório |
+
+**Body:** vazio.
+
+**Resposta**
+
+```json
+true
+```
+
+---
+
+### `GET /auth/me`
+
+Retorna o usuário autenticado (registro Prisma `User`).
+
+| **Auth** | Bearer obrigatório |
+
+**Resposta:** objeto com os campos do modelo `User` (inclui `password` hash no estado atual do código — em produção convém expor um DTO sem senha).
+
+---
+
+### `GET /auth/sessions`
+
+Lista sessões do usuário, com a atual marcada.
+
+| **Auth** | Bearer obrigatório |
+
+**Resposta:** array de objetos:
+
+```json
+[
+    {
+        "id": "<uuid>",
+        "userId": "<id>",
+        "createdAt": "<ISO8601>",
+        "expiresAt": "<ISO8601>",
+        "ip": "<string|null>",
+        "userAgent": "<string|null>",
+        "current": true
+    }
+]
+```
+
+---
+
+### `DELETE /auth/sessions/:id`
+
+Revoga uma sessão específica (por `id` da sessão).
+
+| **Auth** | Bearer obrigatório |
+
+**Resposta:** resultado da operação (boolean / conforme implementação do serviço).
+
+---
+
+### `DELETE /auth/sessions`
+
+Revoga **todas** as sessões do usuário autenticado.
+
+| **Auth** | Bearer obrigatório |
+
+**Resposta**
+
+```json
+true
+```
+
+---
+
+### `POST /auth/email/send-verification`
+
+Reenvia e-mail com link de verificação.
+
+|                |                    |
+| -------------- | ------------------ |
+| **Rate limit** | 3 / 60 s           |
+| **Auth**       | Bearer obrigatório |
+
+**Resposta**
+
+```json
+true
+```
+
+---
+
+### `POST /auth/email/verify`
+
+Confirma o e-mail a partir do `tokenId` (normalmente vindo da query string do link no frontend).
+
+|                |           |
+| -------------- | --------- |
+| **Rate limit** | 10 / 60 s |
+| **Auth**       | Não       |
+
+**Body (JSON)**
+
+| Campo     | Tipo   |
+| --------- | ------ |
+| `tokenId` | string |
+
+**Resposta**
+
+```json
+true
+```
+
+**Erros:** `401` — token inválido, expirado ou e-mail já verificado.
+
+---
+
+## CORS
+
+Por padrão, `origin: true` (reflete o `Origin` do cliente). Opcionalmente defina origens explícitas:
+
+```env
+CORS_ORIGIN=http://localhost:3000,https://seu-dominio.com
+```
+
+(várias origens separadas por vírgula.)
+
+---
+
+## Variáveis de ambiente
+
+| Variável                   | Descrição                                                                                                                                                                                                |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                     | Porta HTTP (default `3000`)                                                                                                                                                                              |
+| `DATABASE_URL`             | URL PostgreSQL. **Senhas com `#`, `@`, etc. devem ser percent-encoded** (ex.: `#` → `%23`). O código normaliza `#` na senha ao montar o pool em alguns casos; prefira já deixar a URL correta no `.env`. |
+| `JWT_SECRET`               | Segredo para assinar o JWT                                                                                                                                                                               |
+| `FRONTEND_URL`             | Base do site (link no e-mail de verificação)                                                                                                                                                             |
+| `REDIS_URL` / `REDIS_PORT` | Redis para o throttler (ex.: `localhost` e `6379`)                                                                                                                                                       |
+| `EMAIL_HOST`               | Remetente Resend (`from`)                                                                                                                                                                                |
+| `EMAIL_KEY`                | API key Resend                                                                                                                                                                                           |
+| `CORS_ORIGIN`              | Opcional — lista de origens permitidas                                                                                                                                                                   |
+
+---
+
+## Prisma: banco de dados
+
+### O que cada comando faz
+
+| Comando                     | Uso                                                                                                                        |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `npx prisma generate`       | Gera o **client** TypeScript em `node_modules`. **Não cria tabelas.** Rode após mudar `schema.prisma` ou ao clonar o repo. |
+| `npx prisma migrate deploy` | **Aplica migrations pendentes** no banco (produção ou CI). **Cria/atualiza tabelas.**                                      |
+| `npx prisma migrate dev`    | Desenvolvimento: cria uma nova migration a partir das mudanças no schema e aplica localmente.                              |
+
+**Primeira vez / banco vazio:** com `DATABASE_URL` apontando para o banco certo:
 
 ```bash
-pnpm run start:dev
+cd luniverso-auth
+npx prisma migrate deploy
+npx prisma generate
+```
+
+Se a tabela não existir, o erro típico é `relation "public.User" does not exist` — falta rodar `migrate deploy` (ou `migrate dev`).
+
+### Schema e migrations
+
+- `prisma/schema.prisma` — modelos `User`, `Session`, `EmailVerification`
+- `prisma/migrations/` — SQL versionado
+
+Configuração do Prisma 7: `prisma.config.ts` (inclui URL do datasource).
+
+---
+
+## Como rodar localmente
+
+```bash
+cd luniverso-auth
+npm install
+```
+
+Subir Redis (opcional, mas o throttler está configurado para Redis — sem Redis pode falhar ao iniciar; nesse caso ajuste o módulo ou use Docker):
+
+```bash
+# exemplo: script redis.sh se existir na pasta
+```
+
+```bash
+npm run start:dev
 ```
 
 Build e produção:
 
 ```bash
-pnpm run build
-pnpm run start:prod
+npm run build
+npm run start:prod
 ```
 
-### Scripts úteis (package.json)
+---
 
-- **`pnpm run start:dev`**: servidor com watch.
-- **`pnpm run lint`**: eslint (com `--fix`).
-- **`pnpm run test`** / **`pnpm run test:e2e`**: testes.
+## Comportamento dos tokens (resumo)
 
-### Notas rápidas
+- **Access token (JWT):** payload com `sub` (id do usuário) e `sessionId`.
+- **Refresh token:** formato `tokenId.secret`; no banco só o segredo fica hasheado; no refresh há **rotação** de `tokenId` e secret.
+- **Sessão:** expira em **30 dias** (`expiresAt`), alinhado ao refresh.
 
-- **`node_modules/`** está dentro de `core/` (projeto Node isolado).
-- O schema GraphQL em `src/schema.gql` é **gerado**; a fonte de verdade são os decorators GraphQL nos resolvers/DTOs.
+---
+
+## Ideias / melhorias futuras
+
+- Redefinição de senha (“esqueci minha senha”)
+- Não retornar `password` em `GET /auth/me`
+- Health check, logging estruturado, testes e2e atualizados para REST
