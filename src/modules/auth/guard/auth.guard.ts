@@ -9,21 +9,31 @@ import { PrismaService } from '../../prisma/prisma.service';
 import * as jwt from 'jsonwebtoken';
 import type { FastifyRequest } from 'fastify';
 
+import { AuthCookieService } from '../auth-cookie.service';
+
 @Injectable()
 export class AuthGuard implements CanActivate {
     constructor(
         private prisma: PrismaService,
         private config: ConfigService,
+        private authCookie: AuthCookieService,
     ) {}
+
+    private getAccessToken(req: FastifyRequest): string | undefined {
+        const authHeader = req.headers.authorization;
+        if (authHeader?.startsWith('Bearer ')) {
+            const t = authHeader.split(' ')[1];
+            if (t) return t;
+        }
+        return this.authCookie.getAccessTokenFromRequest(req);
+    }
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
         const req = context.switchToHttp().getRequest<FastifyRequest>();
-        const authHeader = req.headers.authorization;
 
-        if (!authHeader) throw new UnauthorizedException('Operation requires to be logged in.');
-
-        const token = authHeader.split(' ')[1];
-        if (!token) throw new UnauthorizedException('Operation requires to be logged in.');
+        const token = this.getAccessToken(req);
+        if (!token)
+            throw new UnauthorizedException('Operation requires to be logged in.');
 
         const secret = this.config.get<string>('JWT_SECRET');
         if (!secret) throw new Error('JWT_SECRET not defined');

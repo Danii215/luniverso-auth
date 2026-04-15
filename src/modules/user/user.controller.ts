@@ -8,7 +8,7 @@ type AuthenticatedRequest = FastifyRequest & {
     user: { id: string; sessionId: string };
 };
 
-@Controller('auth')
+@Controller('users')
 export class UserController {
     constructor(private userService: UserService) {}
 

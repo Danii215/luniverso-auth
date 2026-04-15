@@ -22,6 +22,7 @@
     "psql": "sudo -u postgres psql"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.0.2",
     "@nest-lab/throttler-storage-redis": "^1.2.0",
     "@nestjs/common": "^11.1.13",
     "@nestjs/config": "^4.0.3",
@@ -47,6 +48,7 @@
     "@nestjs/cli": "^11.0.16",
     "@nestjs/schematics": "^11.0.9",
     "@nestjs/testing": "^11.1.13",
+    "@types/bun": "latest",
     "@types/jest": "^30.0.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.19.11",
@@ -66,8 +68,7 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.55.0",
-    "@types/bun": "latest"
+    "typescript-eslint": "^8.55.0"
   },
   "jest": {
     "moduleFileExtensions": [

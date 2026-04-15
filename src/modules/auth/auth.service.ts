@@ -23,13 +23,16 @@ export class AuthService {
     async register(input: RegisterInput, ip: string, userAgent: string) {
         const hashedPassword = await argon2.hash(input.password);
 
-        const exists = await this.prisma.user.findFirst({
-            where: {
-                OR: [{ email: input.email }, { username: input.username }],
-            },
+        const existWithUsername = await this.prisma.user.findUnique({
+            where: { username: input.username },
         });
+        if (existWithUsername)
+            throw new ConflictException('Username already in use');
 
-        if (exists) throw new ConflictException('User already exists');
+        const existWithEmail = await this.prisma.user.findUnique({
+            where: { email: input.email },
+        });
+        if (existWithEmail) throw new ConflictException('Email already in use');
 
         const user = await this.prisma.user.create({
             data: {
@@ -50,11 +53,12 @@ export class AuthService {
         ip: string,
         userAgent: string,
     ) {
-        const user = await this.prisma.user.findFirst({ where: { email } });
-        if (!user) throw new UnauthorizedException('Invalid credentials');
+        const user = await this.prisma.user.findUnique({ where: { email } });
+        if (!user) throw new UnauthorizedException('Invalid email or password');
 
         const valid = await argon2.verify(user.password, password);
-        if (!valid) throw new UnauthorizedException('Invalid credentials');
+        if (!valid)
+            throw new UnauthorizedException('Invalid email or password');
 
         return this.createSession(user.id, ip, userAgent);
     }
